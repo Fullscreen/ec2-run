@@ -21,6 +21,7 @@ const version = "1.0.0"
 
 var (
 	versionFlag      bool
+	verboseFlag      bool
 	yesFlag          bool
 	tmuxFlag         bool
 	listSessionsFlag bool
@@ -33,6 +34,7 @@ var (
 
 func main() {
 	flag.BoolVar(&versionFlag, "version", false, "Print version number ("+version+")")
+	flag.BoolVar(&verboseFlag, "v", false, `Be more verbose.`)
 	flag.BoolVar(&yesFlag, "y", false, `Automatically pick the oldest server if presented with more than one.`)
 	flag.BoolVar(&tmuxFlag, "t", false, `Use tmux. Recommended if your ssh session is critical or you are running a big migration.`)
 	flag.BoolVar(&listSessionsFlag, "l", false, `List tmux sessions running on the server.`)
@@ -53,9 +55,11 @@ func main() {
 	usr, _ := user.Current()
 	credentialsPath := fmt.Sprintf("%s/.aws/credentials", usr.HomeDir)
 	credentialsProvider := credentials.NewSharedCredentials(credentialsPath, profileFlag)
-	// creds, err := credentialsProvider.Get()
-	// check(err)
-	// fmt.Printf("Using access key %s from profile \"%s\".\n", creds.AccessKeyID, profileFlag)
+	if verboseFlag {
+		creds, err := credentialsProvider.Get()
+		check(err)
+		fmt.Printf("Using access key %s from profile \"%s\".\n", creds.AccessKeyID, profileFlag)
+	}
 
 	// Create session
 	sess, err := session.NewSession(&aws.Config{
@@ -107,9 +111,11 @@ func main() {
 	matcher := fmt.Sprintf("*%s*", stackFlag)
 
 	command := strings.Join(flag.Args(), " ")
-	if command == "" {
+	if command == "" && !listSessionsFlag {
 		command = "rails console"
-		fmt.Printf("Missing command, will use '%s'.\n", command)
+		if verboseFlag {
+			fmt.Printf("Missing command, will run '%s'.\n", command)
+		}
 	}
 
 	// ec2 describe-instances
@@ -137,11 +143,14 @@ func main() {
 	var cmd string
 	if listSessionsFlag {
 		cmd = "tmux list-sessions"
+		fmt.Println("If you see 'failed to connect to server', this means there are no sessions open.")
 	} else if tmuxFlag {
 		if sessionNameFlag == "" {
 			sessionNameFlag = fmt.Sprintf("console-%s", os.Getenv("USER"))
 		}
-		fmt.Printf("Using tmux session name '%s'.\n", sessionNameFlag)
+		if verboseFlag {
+			fmt.Printf("Using tmux session name '%s'.\n", sessionNameFlag)
+		}
 		cmd = fmt.Sprintf(`
 export SESSION_NAME="%s"
 export COMMAND="%s"
@@ -169,8 +178,11 @@ fi`, sessionNameFlag, command)
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "ConnectTimeout=10",
 		"-t",
-		cmd,
 	}
+	if verboseFlag {
+		sshOptions = append(sshOptions, "-v")
+	}
+	sshOptions = append(sshOptions, cmd)
 	// fmt.Println(sshOptions)
 	fmt.Printf("Opening ssh session to: %s...\n", ip)
 
