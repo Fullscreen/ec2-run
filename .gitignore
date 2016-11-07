@@ -1,5 +1,5 @@
 Thumbs.db
 *.DS_Store
 *.swp
-ec2-run
-release/
+/ec2-run
+/release/

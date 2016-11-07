@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"sort"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/cloudformation"
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
@@ -21,6 +23,7 @@ var (
 	yesFlag          bool
 	tmuxFlag         bool
 	listSessionsFlag bool
+	listStacksFlag   bool
 	profileFlag      string
 	regionFlag       string
 	stackFlag        string
@@ -32,6 +35,7 @@ func main() {
 	flag.BoolVar(&yesFlag, "y", false, `Automatically pick the oldest server if presented with more than one.`)
 	flag.BoolVar(&tmuxFlag, "t", false, `Use tmux. Recommended if your ssh session is critical or you are running a big migration.`)
 	flag.BoolVar(&listSessionsFlag, "l", false, `List tmux sessions running on the server.`)
+	flag.BoolVar(&listStacksFlag, "ls", false, `List stacks (optionally with a filter).`)
 	flag.StringVar(&profileFlag, "profile", "default", `The AWS profile to use.`)
 	flag.StringVar(&regionFlag, "region", "us-east-1", `The AWS region to use.`)
 	flag.StringVar(&stackFlag, "s", "", `The stack name.`)
@@ -43,8 +47,53 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Get credentials based on profile flag
+	// TODO: Better to modify AWS_PROFILE env var?
+	usr, _ := user.Current()
+	credentialsPath := fmt.Sprintf("%s/.aws/credentials", usr.HomeDir)
+	credentialsProvider := credentials.NewSharedCredentials(credentialsPath, profileFlag)
+	// creds, err := credentialsProvider.Get()
+	// check(err)
+	// fmt.Printf("Using access key %s from profile \"%s\".\n", creds.AccessKeyID, profileFlag)
+
+	// Create session
+	sess, err := session.NewSession(&aws.Config{
+		Region:      &regionFlag,
+		Credentials: credentialsProvider,
+	})
+	check(err)
+
+	if listStacksFlag {
+		stackName := flag.Arg(0)
+		cfClient := cloudformation.New(sess)
+		var nextToken *string
+		var stacks []string
+		for {
+			respDescribeStacks, err2 := cfClient.DescribeStacks(&cloudformation.DescribeStacksInput{
+				NextToken: nextToken,
+			})
+			check(err2)
+			for _, stack := range respDescribeStacks.Stacks {
+				if stackName == "" || strings.Contains(*stack.StackName, stackName) {
+					stacks = append(stacks, *stack.StackName)
+				}
+			}
+			if respDescribeStacks.NextToken == nil {
+				break
+			}
+			nextToken = respDescribeStacks.NextToken
+		}
+		sort.Strings(stacks)
+		for _, stack := range stacks {
+			fmt.Println(stack)
+		}
+		os.Exit(0)
+	}
+
 	if stackFlag == "" {
-		fmt.Println("Missing stack name. You can use a CloudFormation stack name from https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks?filter=active")
+		flag.PrintDefaults()
+		fmt.Println("\nError: Missing stack name.")
+		fmt.Printf("Use -ls to list stacks in the command line or visit https://console.aws.amazon.com/cloudformation/home?region=%s#/stacks?filter=active\n", regionFlag)
 		os.Exit(1)
 	}
 	matcher := fmt.Sprintf("*%s*", stackFlag)
@@ -54,22 +103,6 @@ func main() {
 		command = "rails console"
 		fmt.Printf("Missing command, will use '%s'.\n", command)
 	}
-
-	// Get credentials based on profile flag
-	// TODO: Better to modify AWS_PROFILE env var?
-	usr, _ := user.Current()
-	credentialsPath := fmt.Sprintf("%s/.aws/credentials", usr.HomeDir)
-	credentialsProvider := credentials.NewSharedCredentials(credentialsPath, profileFlag)
-	creds, err := credentialsProvider.Get()
-	check(err)
-	fmt.Printf("Using access key %s from profile \"%s\".\n", creds.AccessKeyID, profileFlag)
-
-	// Create session
-	sess, err := session.NewSession(&aws.Config{
-		Region:      &regionFlag,
-		Credentials: credentialsProvider,
-	})
-	check(err)
 
 	// ec2 describe-instances
 	ec2Client := ec2.New(sess)
