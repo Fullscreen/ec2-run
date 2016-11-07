@@ -1,19 +1,23 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudformation"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/olekukonko/tablewriter"
 	"github.com/tcnksm/go-gitconfig"
 )
 
@@ -124,26 +128,88 @@ func main() {
 		Filters: []*ec2.Filter{
 			{
 				Name: aws.String("tag:aws:cloudformation:stack-name"),
+				// Name: aws.String("tag:Name"),
 				Values: []*string{
 					aws.String(matcher),
+				},
+			},
+			{
+				Name: aws.String("instance-state-name"),
+				Values: []*string{
+					aws.String("running"),
 				},
 			},
 		},
 	})
 	check(err)
 
-	if len(respDescribeInstances.Reservations) == 0 {
-		fmt.Printf("No instances matched '%s'.", matcher)
-		return
+	var instances []*ec2.Instance
+
+	for _, reservation := range respDescribeInstances.Reservations {
+		for _, instance := range reservation.Instances {
+			instances = append(instances, instance)
+		}
 	}
-	fmt.Printf("Found %d instances matching '%s'..\n", len(respDescribeInstances.Reservations[0].Instances), matcher)
-	// TODO: Print a table that the user can select a server from
-	ip := *respDescribeInstances.Reservations[0].Instances[0].PrivateIpAddress
+
+	var instance *ec2.Instance
+	switch len(instances) {
+	case 0:
+		fmt.Printf("No instances matched '%s'.", matcher)
+		os.Exit(1)
+	case 1:
+		fmt.Printf("Found 1 instance matching '%s'.\n", matcher)
+		instance = instances[0]
+	default:
+		sort.Sort(byLaunchTime(instances))
+		fmt.Printf("Found %d instances matching '%s':\n", len(instances), matcher)
+
+		if !yesFlag || verboseFlag {
+			table := tablewriter.NewWriter(os.Stdout)
+			table.SetHeader([]string{"#", "Name", "ID", "Type", "Uptime", "Roles"})
+			table.SetBorder(false)
+			for i, instance := range instances {
+				table.Append([]string{
+					strconv.Itoa(i),
+					getTag("Name", instance),
+					*instance.InstanceId,
+					*instance.InstanceType,
+					strconv.FormatFloat(time.Now().Sub(*instance.LaunchTime).Hours(), 'f', 1, 64),
+					getTag("Roles", instance),
+				})
+			}
+			fmt.Println()
+			table.Render()
+		}
+
+		// fmt.Println()
+		if yesFlag {
+			fmt.Printf("Automatically selected %s\n", getTag("Name", instances[0]))
+			instance = instances[0]
+		} else {
+			reader := bufio.NewReader(os.Stdin)
+			fmt.Print("Select instance: [0] ")
+			text, _ := reader.ReadString('\n')
+			if text == "\n" {
+				text = "0"
+			}
+			selection, err2 := strconv.Atoi(strings.TrimRight(text, "\n"))
+			if err2 != nil {
+				fmt.Println("Error: unable to convert selection to number.")
+				os.Exit(1)
+			}
+			if selection < 0 || selection > len(instances) {
+				fmt.Println("Error: index out of range.")
+				os.Exit(1)
+			}
+			instance = instances[selection]
+		}
+	}
+	ip := *instance.PrivateIpAddress
 
 	var cmd string
 	if listSessionsFlag {
 		cmd = "tmux list-sessions"
-		fmt.Println("If you see 'failed to connect to server', this means there are no sessions open.")
+		fmt.Println("If you see 'failed to connect to server', this means there are no tmux sessions open.")
 	} else if tmuxFlag {
 		if sessionNameFlag == "" {
 			sessionNameFlag = fmt.Sprintf("console-%s", os.Getenv("USER"))
@@ -165,10 +231,10 @@ if [[ $? -eq 0 ]]; then
     echo "Did not understand '$WAT'"
   fi
 else
-  tmux new-session -s "$SESSION_NAME" "sudo -su deploy -- bash -i -c \"cd /srv; source app-env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; $COMMAND\""
+  tmux new-session -s "$SESSION_NAME" "sudo -su deploy -- bash -i -c \"cd /srv; source app-env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; echo; $COMMAND\""
 fi`, sessionNameFlag, command)
 	} else {
-		cmd = fmt.Sprintf(`sudo -su deploy -- bash -i -c "cd /srv; source app-env; echo 'Running: %s'; %s"`, command, command)
+		cmd = fmt.Sprintf(`sudo -su deploy -- bash -i -c "cd /srv; source app-env; echo 'Running: %s'; echo; %s"`, command, command)
 	}
 
 	sshOptions := []string{
@@ -183,7 +249,9 @@ fi`, sessionNameFlag, command)
 		sshOptions = append(sshOptions, "-v")
 	}
 	sshOptions = append(sshOptions, cmd)
-	// fmt.Println(sshOptions)
+	if verboseFlag {
+		fmt.Println("ssh", sshOptions)
+	}
 	fmt.Printf("Opening ssh session to: %s...\n", ip)
 
 	sshCmd := exec.Command("ssh", sshOptions...)
@@ -191,7 +259,35 @@ fi`, sessionNameFlag, command)
 	sshCmd.Stdout = os.Stdout
 	sshCmd.Stderr = os.Stderr
 	sshCmd.Start()
-	check(sshCmd.Wait())
+	err = sshCmd.Wait()
+	if err != nil {
+		if err.Error() == "exit status 255" {
+			fmt.Println("Please make sure you are connected to the VPN if you are away from the office.")
+		} else {
+			check(err)
+		}
+	}
+}
+
+func getTag(name string, instance *ec2.Instance) string {
+	for _, t := range instance.Tags {
+		if *t.Key == name {
+			return *t.Value
+		}
+	}
+	return ""
+}
+
+type byLaunchTime []*ec2.Instance
+
+func (s byLaunchTime) Len() int {
+	return len(s)
+}
+func (s byLaunchTime) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s byLaunchTime) Less(i, j int) bool {
+	return s[i].LaunchTime.Before(*s[j].LaunchTime)
 }
 
 func check(err error) {

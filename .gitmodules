@@ -4,3 +4,6 @@
 [submodule "vendor/github.com/tcnksm/go-gitconfig"]
 	path = vendor/github.com/tcnksm/go-gitconfig
 	url = https://github.com/tcnksm/go-gitconfig
+[submodule "vendor/github.com/olekukonko/tablewriter"]
+	path = vendor/github.com/olekukonko/tablewriter
+	url = https://github.com/olekukonko/tablewriter
