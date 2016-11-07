@@ -1,3 +1,6 @@
 [submodule "vendor/github.com/aws/aws-sdk-go"]
 	path = vendor/github.com/aws/aws-sdk-go
 	url = https://github.com/aws/aws-sdk-go
+[submodule "vendor/github.com/tcnksm/go-gitconfig"]
+	path = vendor/github.com/tcnksm/go-gitconfig
+	url = https://github.com/tcnksm/go-gitconfig

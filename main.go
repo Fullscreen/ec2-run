@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudformation"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/tcnksm/go-gitconfig"
 )
 
 const version = "1.0.0"
@@ -91,10 +92,17 @@ func main() {
 	}
 
 	if stackFlag == "" {
-		flag.PrintDefaults()
-		fmt.Println("\nError: Missing stack name.")
-		fmt.Printf("Use -ls to list stacks in the command line or visit https://console.aws.amazon.com/cloudformation/home?region=%s#/stacks?filter=active\n", regionFlag)
-		os.Exit(1)
+		stack, err2 := gitconfig.Local("ec2-run.stack")
+		if err2 == nil {
+			fmt.Printf("Using stack from git config: %s\n", stack)
+			stackFlag = stack
+		} else {
+			flag.PrintDefaults()
+			fmt.Println("\nError: Missing stack name.")
+			fmt.Printf("Use -ls to list stacks in the command line or visit https://console.aws.amazon.com/cloudformation/home?region=%s#/stacks?filter=active\n", regionFlag)
+			fmt.Println("See README.md on how to set a default stack.")
+			os.Exit(1)
+		}
 	}
 	matcher := fmt.Sprintf("*%s*", stackFlag)
 
@@ -133,7 +141,7 @@ func main() {
 		if sessionNameFlag == "" {
 			sessionNameFlag = fmt.Sprintf("console-%s", os.Getenv("USER"))
 		}
-		fmt.Printf("Using tmux session name '%s'.", sessionNameFlag)
+		fmt.Printf("Using tmux session name '%s'.\n", sessionNameFlag)
 		cmd = fmt.Sprintf(`
 export SESSION_NAME="%s"
 export COMMAND="%s"
