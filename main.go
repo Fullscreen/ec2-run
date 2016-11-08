@@ -261,7 +261,7 @@ else
   tmux new-session -s "$USER" "sudo -su deploy -- bash -i -c \"cd /srv; source app-env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; echo; $COMMAND\""
 fi`, command)
 		} else {
-			cmd = fmt.Sprintf(`sudo -su deploy -- bash -i -c "cd /srv; source app-env; echo 'Running: %s'; echo; %s"`, command, command)
+			cmd = fmt.Sprintf(`sudo -su deploy -- bash -i -c "set -e; cd /srv; source app-env; echo 'Running: %s'; echo; %s"`, command, command)
 		}
 	}
 
