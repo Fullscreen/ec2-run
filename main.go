@@ -71,15 +71,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	if stackFlag == "" {
-		fmt.Println("Error: Missing stack name.")
-		fmt.Printf("Use -ls to list stacks or visit https://console.aws.amazon.com/cloudformation/home?region=%s#/stacks?filter=active\n", regionFlag)
-		fmt.Println("See README.md for information on how to set a default stack.")
-		fmt.Println()
-		flag.Usage()
-		os.Exit(1)
-	}
-
 	// Get credentials based on profile flag
 	// TODO: Better to modify AWS_PROFILE env var?
 	usr, _ := user.Current()
@@ -123,6 +114,13 @@ func main() {
 			fmt.Println(stack)
 		}
 		os.Exit(0)
+	} else if stackFlag == "" {
+		fmt.Println("Error: Missing stack name.")
+		fmt.Printf("Use -ls to list stacks or visit https://console.aws.amazon.com/cloudformation/home?region=%s#/stacks?filter=active\n", regionFlag)
+		fmt.Println("See README.md for information on how to set a default stack.")
+		fmt.Println()
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	matcher := fmt.Sprintf("*%s*", stackFlag)
