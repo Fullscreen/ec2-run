@@ -7,6 +7,9 @@ worked, is that this is run on the actual servers. So there is a chance you may
 break a production server using this. For this reason, you may want to connect
 to workers.
 
+Invoke with `-t` to start a tmux session on the remote server. For a tutorial on
+tmux, see: https://danielmiessler.com/study/tmux/
+
 ## ProTips
 
 ### Set a default stack name
@@ -16,6 +19,24 @@ $ git config --local ec2-run.stack stage-sphinx
 ```
 
 Now if you omit the `-s` flag, `stage-sphinx` will automatically be used.
+
+Revert with:
+
+```bash
+$ git config --local --unset ec2-run.stack
+```
+
+### Use tmux by default
+
+```bash
+$ git config --global ec2-run.tmux true
+```
+
+Revert with:
+
+```bash
+$ git config --global --unset ec2-run.tmux
+```
 
 ## Contribute
 

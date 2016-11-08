@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -37,15 +38,31 @@ var (
 )
 
 func main() {
+	flag.Usage = func() {
+		fmt.Printf("Usage: %s [options] [command]\n", os.Args[0])
+		fmt.Println(" [options]:")
+		flag.PrintDefaults()
+		fmt.Println()
+		fmt.Println(` [command]:`)
+		fmt.Println(`  Command to run on the remote server. (default "rails console")`)
+	}
+
+	stackFlag, _ := gitconfig.Local("ec2-run.stack")
+	tmuxFlagStr, err := gitconfig.Local("ec2-run.tmux")
+	if err != nil {
+		tmuxFlagStr, _ = gitconfig.Global("ec2-run.tmux")
+	}
+	tmuxFlag = (tmuxFlagStr == "true")
+
 	flag.BoolVar(&versionFlag, "version", false, "Print version number ("+version+")")
 	flag.BoolVar(&verboseFlag, "v", false, `Be more verbose.`)
 	flag.BoolVar(&yesFlag, "y", false, `Automatically pick the oldest server if presented with more than one.`)
-	flag.BoolVar(&tmuxFlag, "t", false, `Use tmux. Recommended if your ssh session is critical or you are running a big migration.`)
+	flag.BoolVar(&tmuxFlag, "t", tmuxFlag, `Use tmux. Recommended if your ssh session is critical or you are running a big migration.`)
 	flag.BoolVar(&listSessionsFlag, "l", false, `List tmux sessions running on the server.`)
 	flag.BoolVar(&listStacksFlag, "ls", false, `List stacks (optionally with a filter).`)
 	flag.StringVar(&profileFlag, "profile", "default", `The AWS profile to use.`)
 	flag.StringVar(&regionFlag, "region", "us-east-1", `The AWS region to use.`)
-	flag.StringVar(&stackFlag, "s", "", `The stack name.`)
+	flag.StringVar(&stackFlag, "s", stackFlag, `The stack name.`)
 	flag.StringVar(&sessionNameFlag, "n", "", `The name of the tmux session. You can use this to open another person's session.`)
 	flag.Parse()
 
@@ -54,14 +71,23 @@ func main() {
 		os.Exit(0)
 	}
 
+	if stackFlag == "" {
+		fmt.Println("Error: Missing stack name.")
+		fmt.Printf("Use -ls to list stacks or visit https://console.aws.amazon.com/cloudformation/home?region=%s#/stacks?filter=active\n", regionFlag)
+		fmt.Println("See README.md for information on how to set a default stack.")
+		fmt.Println()
+		flag.Usage()
+		os.Exit(1)
+	}
+
 	// Get credentials based on profile flag
 	// TODO: Better to modify AWS_PROFILE env var?
 	usr, _ := user.Current()
 	credentialsPath := fmt.Sprintf("%s/.aws/credentials", usr.HomeDir)
 	credentialsProvider := credentials.NewSharedCredentials(credentialsPath, profileFlag)
 	if verboseFlag {
-		creds, err := credentialsProvider.Get()
-		check(err)
+		creds, err2 := credentialsProvider.Get()
+		check(err2)
 		fmt.Printf("Using access key %s from profile \"%s\".\n", creds.AccessKeyID, profileFlag)
 	}
 
@@ -99,28 +125,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	if stackFlag == "" {
-		stack, err2 := gitconfig.Local("ec2-run.stack")
-		if err2 == nil {
-			fmt.Printf("Using stack from git config: %s\n", stack)
-			stackFlag = stack
-		} else {
-			flag.PrintDefaults()
-			fmt.Println("\nError: Missing stack name.")
-			fmt.Printf("Use -ls to list stacks in the command line or visit https://console.aws.amazon.com/cloudformation/home?region=%s#/stacks?filter=active\n", regionFlag)
-			fmt.Println("See README.md on how to set a default stack.")
-			os.Exit(1)
-		}
-	}
 	matcher := fmt.Sprintf("*%s*", stackFlag)
-
-	command := strings.Join(flag.Args(), " ")
-	if command == "" && !listSessionsFlag {
-		command = "rails console"
-		if verboseFlag {
-			fmt.Printf("Missing command, will run '%s'.\n", command)
-		}
-	}
 
 	// ec2 describe-instances
 	ec2Client := ec2.New(sess)
@@ -181,7 +186,6 @@ func main() {
 			table.Render()
 		}
 
-		// fmt.Println()
 		if yesFlag {
 			fmt.Printf("Automatically selected %s\n", getTag("Name", instances[0]))
 			instance = instances[0]
@@ -209,32 +213,48 @@ func main() {
 	var cmd string
 	if listSessionsFlag {
 		cmd = "tmux list-sessions"
-		fmt.Println("If you see 'failed to connect to server', this means there are no tmux sessions open.")
-	} else if tmuxFlag {
-		if sessionNameFlag == "" {
-			sessionNameFlag = fmt.Sprintf("console-%s", os.Getenv("USER"))
+	} else {
+		command := strings.Join(flag.Args(), " ")
+		if command == "" {
+			command = "rails console"
+			if verboseFlag {
+				fmt.Printf("Missing command, will run '%s'.\n", command)
+			}
 		}
-		if verboseFlag {
-			fmt.Printf("Using tmux session name '%s'.\n", sessionNameFlag)
-		}
-		cmd = fmt.Sprintf(`
-export SESSION_NAME="%s"
+
+		if sessionNameFlag != "" {
+			if verboseFlag {
+				fmt.Printf("Using tmux session name '%s'.\n", sessionNameFlag)
+			}
+			cmd = fmt.Sprintf(`
 export COMMAND="%s"
+export SESSION_NAME="%s"
 tmux has-session -t "$SESSION_NAME"
 if [[ $? -eq 0 ]]; then
-  read -p "There is a session with the name $SESSION_NAME already. Do you want to (a)ttach to or (k)ill the session? " WAT
+  tmux attach-session -t "$SESSION_NAME"
+else
+  tmux new-session -s "$SESSION_NAME" "sudo -su deploy -- bash -i -c \"cd /srv; source app-env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; echo; $COMMAND\""
+fi`, command, sessionNameFlag)
+		} else if tmuxFlag {
+			cmd = fmt.Sprintf(`
+export COMMAND="%s"
+tmux has-session -t "$USER"
+if [[ $? -eq 0 ]]; then
+  read -p "There is a session with the name $USER already. Do you want to (a)ttach to or (k)ill the session? " WAT
   if [[ "$WAT" == "a" ]]; then
-    tmux attach-session -t "$SESSION_NAME"
+    tmux attach-session -t "$USER"
   elif [[ "$WAT" == "k" ]]; then
-    tmux kill-session -t "$SESSION_NAME"
+    tmux kill-session -t "$USER"
+    echo "Killed $USER."
   else
     echo "Did not understand '$WAT'"
   fi
 else
-  tmux new-session -s "$SESSION_NAME" "sudo -su deploy -- bash -i -c \"cd /srv; source app-env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; echo; $COMMAND\""
-fi`, sessionNameFlag, command)
-	} else {
-		cmd = fmt.Sprintf(`sudo -su deploy -- bash -i -c "cd /srv; source app-env; echo 'Running: %s'; echo; %s"`, command, command)
+  tmux new-session -s "$USER" "sudo -su deploy -- bash -i -c \"cd /srv; source app-env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; echo; $COMMAND\""
+fi`, command)
+		} else {
+			cmd = fmt.Sprintf(`sudo -su deploy -- bash -i -c "cd /srv; source app-env; echo 'Running: %s'; echo; %s"`, command, command)
+		}
 	}
 
 	sshOptions := []string{
@@ -256,11 +276,28 @@ fi`, sessionNameFlag, command)
 
 	sshCmd := exec.Command("ssh", sshOptions...)
 	sshCmd.Stdin = os.Stdin
-	sshCmd.Stdout = os.Stdout
-	sshCmd.Stderr = os.Stderr
+
+	var out bytes.Buffer
+	if listSessionsFlag {
+		sshCmd.Stdout = &out
+	} else {
+		sshCmd.Stdout = os.Stdout
+		sshCmd.Stderr = os.Stderr
+	}
+
 	sshCmd.Start()
 	err = sshCmd.Wait()
-	if err != nil {
+
+	if listSessionsFlag {
+		fmt.Println()
+		fmt.Println("Open tmux sessions:")
+		text := out.String()
+		if strings.TrimRight(text, "\r\n") == "failed to connect to server" {
+			fmt.Println("No sessions open.")
+		} else {
+			fmt.Print(text)
+		}
+	} else if err != nil {
 		if err.Error() == "exit status 255" {
 			fmt.Println("Please make sure you are connected to the VPN if you are away from the office.")
 		} else {
