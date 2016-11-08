@@ -14,6 +14,9 @@ tmux, see: https://danielmiessler.com/study/tmux/
 
 ### Set a default stack name
 
+If you don't specify `-s`, the tool will try to figure out a stack name from
+your git remotes, but you can set a git config to override that.
+
 ```bash
 $ git config --local ec2-run.stack stage-sphinx
 ```

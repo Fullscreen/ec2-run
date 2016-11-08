@@ -47,7 +47,17 @@ func main() {
 		fmt.Println(`  Command to run on the remote server. (default "rails console")`)
 	}
 
-	stackFlag, _ := gitconfig.Local("ec2-run.stack")
+	stackFlag, err := gitconfig.Local("ec2-run.stack")
+	if err != nil {
+		url, err2 := gitconfig.Local("remote.origin.url")
+		if err2 == nil {
+			components := strings.Split(url, "/")
+			stackFlag = strings.ToLower(components[len(components)-1])
+			if strings.HasSuffix(stackFlag, ".git") {
+				stackFlag = stackFlag[:len(stackFlag)-4]
+			}
+		}
+	}
 	tmuxFlagStr, err := gitconfig.Local("ec2-run.tmux")
 	if err != nil {
 		tmuxFlagStr, _ = gitconfig.Global("ec2-run.tmux")
@@ -156,7 +166,8 @@ func main() {
 	var instance *ec2.Instance
 	switch len(instances) {
 	case 0:
-		fmt.Printf("No instances matched '%s'.", matcher)
+		fmt.Printf("No instances matched '%s'.\n", matcher)
+		fmt.Println("List stacks with -ls. See usage with --help.")
 		os.Exit(1)
 	case 1:
 		fmt.Printf("Found 1 instance matching '%s'.\n", matcher)
@@ -269,7 +280,7 @@ fi`, command)
 	if verboseFlag {
 		fmt.Println("ssh", sshOptions)
 	}
-	fmt.Printf("Opening ssh session to: %s...\n", ip)
+	fmt.Printf("Opening ssh session to: %s (%s)...\n", getTag("Name", instance), ip)
 
 	sshCmd := exec.Command("ssh", sshOptions...)
 	sshCmd.Stdin = os.Stdin
