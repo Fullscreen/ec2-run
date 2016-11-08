@@ -22,7 +22,7 @@ import (
 	"github.com/tcnksm/go-gitconfig"
 )
 
-const version = "1.0.0"
+const version = "0.1.0"
 
 var (
 	versionFlag      bool
@@ -149,7 +149,6 @@ func main() {
 	check(err)
 
 	var instances []*ec2.Instance
-
 	for _, reservation := range respDescribeInstances.Reservations {
 		for _, instance := range reservation.Instances {
 			instances = append(instances, instance)
