@@ -22,7 +22,7 @@ import (
 	"github.com/tcnksm/go-gitconfig"
 )
 
-const version = "0.1.0"
+const version = "1.0.0"
 
 var (
 	versionFlag      bool
