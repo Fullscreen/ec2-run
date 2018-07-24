@@ -1,5 +1,5 @@
-VERSION = 1.0.0
-LDFLAGS = -ldflags '-s -w'
+VERSION = $(shell cat VERSION)
+LDFLAGS = -ldflags '-s -w -X main.version=$(VERSION)'
 GOARCH = amd64
 linux: export GOOS=linux
 darwin: export GOOS=darwin
