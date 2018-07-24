@@ -241,7 +241,7 @@ tmux has-session -t "$SESSION_NAME"
 if [[ $? -eq 0 ]]; then
   tmux attach-session -t "$SESSION_NAME"
 else
-  tmux new-session -s "$SESSION_NAME" "sudo -su deploy -- bash -i -c \"cd /srv; source app-env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; echo; $COMMAND\""
+  tmux new-session -s "$SESSION_NAME" "sudo -su deploy -- bash -i -c \"cd /srv; source app?env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; echo; $COMMAND\""
 fi`, command, sessionNameFlag)
 		} else if tmuxFlag {
 			cmd = fmt.Sprintf(`
@@ -258,10 +258,10 @@ if [[ $? -eq 0 ]]; then
     echo "Did not understand '$WAT'"
   fi
 else
-  tmux new-session -s "$USER" "sudo -su deploy -- bash -i -c \"cd /srv; source app-env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; echo; $COMMAND\""
+  tmux new-session -s "$USER" "sudo -su deploy -- bash -i -c \"cd /srv; source app?env; echo 'Running: $COMMAND... Press Ctrl+B then D to detach your session.'; echo; $COMMAND\""
 fi`, command)
 		} else {
-			cmd = fmt.Sprintf(`sudo -su deploy -- bash -i -c "set -e; cd /srv; source app-env; echo 'Running: %s'; echo; %s"`, command, command)
+			cmd = fmt.Sprintf(`sudo -su deploy -- bash -i -c "set -e; cd /srv; source app?env; echo 'Running: %s'; echo; %s"`, command, command)
 		}
 	}
 
